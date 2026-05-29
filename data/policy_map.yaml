@@ -1,0 +1,46 @@
+# Policy-to-target lookup (NOT RAG — a transparent 5-8 row table).
+# Sources the targets the review room actually measures against, with the mandate each comes
+# from. In a later phase this becomes the deterministic baseline a Policy RAG layer must beat.
+
+targets:
+  diksha_sessions_per_school_weekly:
+    label: "Avg weekly DIKSHA sessions per school"
+    target: 50
+    direction: higher_is_better
+    source: "Digital Learning Adoption Guideline"
+    note: "Expected average weekly DIKSHA sessions per active school."
+
+  teacher_training_completion_pct:
+    label: "Teacher training completion"
+    target: 80
+    direction: higher_is_better
+    source: "Teacher Training Circular 2025 (NISHTHA/FLN)"
+    note: "Minimum module completion expected by mid-cycle."
+
+  fln_proficiency_pct:
+    label: "FLN proficiency (children at grade level)"
+    target: 60
+    direction: higher_is_better
+    source: "NIPUN Bharat Mission"
+    note: "Share of children at grade-level FLN; mission goal is universal by Grade 3."
+
+  fln_gain_points:
+    label: "FLN improvement (baseline to endline)"
+    target: 12
+    direction: higher_is_better
+    source: "NIPUN Bharat / FLN Goals"
+    note: "Expected baseline-to-endline improvement over a full cycle."
+
+  open_critical_issues:
+    label: "Open critical field issues"
+    target: 0
+    direction: lower_is_better
+    source: "District Review Circular"
+    note: "No critical field issues should remain open at review time."
+
+  usage_coverage_pct:
+    label: "Usage reporting coverage"
+    target: 90
+    direction: higher_is_better
+    source: "District Review Circular"
+    note: "Share of schools reporting platform usage in the review period."

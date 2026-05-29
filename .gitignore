@@ -1,0 +1,17 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+
+# Secrets — never commit real keys
+.env
+
+# Generated artifacts (regenerable from the seeded scripts)
+data/synthetic/*.csv
+outputs/*.md
+outputs/*.csv
+outputs/*.json
+!outputs/.gitkeep
