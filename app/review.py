@@ -41,8 +41,10 @@ from app.config import (
     STATE_NAME,
     SYNTHETIC_DIR,
 )
-from app.llm.base import SUPPORTED_SECTIONS, LLMProvider
+from app.eval.grounding import check_grounding
+from app.llm.base import SUPPORTED_SECTIONS, BaseLLMProvider, GenerationResult
 from app.llm.factory import ProviderResolution, get_provider
+from app.llm.mock_llm import MockLLM
 from app.reporting.action_tracker import (
     ACTION_COLUMNS,
     build_action_tracker,
@@ -364,12 +366,90 @@ def build_review_facts(
 # -----------------------------------------------------------------------------
 
 
-def _narrate_all(provider: LLMProvider, facts: dict) -> dict[str, str]:
-    """Walk every SUPPORTED_SECTION and ask the provider to narrate it."""
-    out: dict[str, str] = {}
+@dataclass
+class NarrationReport:
+    """Per-section telemetry returned alongside the assembled narratives.
+
+    Keeps the orchestrator's fallback bookkeeping in one place so the audit log can
+    record exactly which sections used which provider, and why.
+    """
+
+    narratives: dict[str, str]
+    section_metadata: dict[str, dict]
+    grounding_failures: dict[str, list[str]]
+    total_latency_ms: float
+    any_section_fell_back: bool
+
+
+def _narrate_all(
+    provider: BaseLLMProvider,
+    facts: dict,
+    *,
+    strict_grounding: bool = False,
+    mock_for_fallback: BaseLLMProvider | None = None,
+) -> NarrationReport:
+    """Walk every SUPPORTED_SECTION and ask the provider to narrate it.
+
+    For every section we:
+      1. Call the provider to get a `GenerationResult`.
+      2. If the call errored or returned empty text, fall back to MockLLM.
+      3. Otherwise check that every numeric token in the text is grounded in `facts`.
+         If grounding fails, fall back to MockLLM and record the offending tokens.
+
+    With `strict_grounding=True`, *any* section grounding failure triggers a full-memo
+    fallback at the end (handled by the caller via `any_section_fell_back`).
+    """
+    mock = mock_for_fallback or MockLLM()
+
+    narratives: dict[str, str] = {}
+    section_meta: dict[str, dict] = {}
+    grounding_failures: dict[str, list[str]] = {}
+    total_latency = 0.0
+    any_fell_back = False
+
     for section in SUPPORTED_SECTIONS:
-        out[section] = provider.generate_section(section, facts)
-    return out
+        primary: GenerationResult = provider.generate(section, facts)
+        total_latency += primary.latency_ms
+        used = primary
+
+        # --- 1. Call-time failure path ---
+        if primary.error or not primary.text.strip():
+            mock_result = mock.generate(section, facts)
+            mock_result.fallback_used = True
+            mock_result.fallback_reason = primary.error or "empty_provider_output"
+            used = mock_result
+            any_fell_back = True
+        else:
+            # --- 2. Grounding check on the prose ---
+            ungrounded = check_grounding(primary.text, facts)
+            if ungrounded:
+                grounding_failures[section] = ungrounded
+                mock_result = mock.generate(section, facts)
+                mock_result.fallback_used = True
+                mock_result.fallback_reason = (
+                    f"grounding_failed: {len(ungrounded)} ungrounded token(s)"
+                )
+                used = mock_result
+                any_fell_back = True
+
+        narratives[section] = used.text
+        section_meta[section] = {
+            "provider": used.provider_name,
+            "model": used.model,
+            "latency_ms": round(used.latency_ms, 2),
+            "fallback_used": used.fallback_used,
+            "fallback_reason": used.fallback_reason,
+            # Always record the primary attempt's error too, even if a fallback recovered:
+            "primary_error": primary.error,
+        }
+
+    return NarrationReport(
+        narratives=narratives,
+        section_metadata=section_meta,
+        grounding_failures=grounding_failures,
+        total_latency_ms=total_latency,
+        any_section_fell_back=any_fell_back,
+    )
 
 
 def _write_facts_json(facts: dict, path: Path) -> Path:
@@ -389,11 +469,17 @@ def run_review(
     top_n_blocks: int = 5,
     top_n_actions: int = 10,
     llm_provider: str = "mock",
+    strict_grounding: bool = False,
     outputs_dir: Path = OUTPUTS_DIR,
     synthetic_dir: Path = SYNTHETIC_DIR,
     timestamp: str | None = None,
 ) -> ReviewArtifacts:
-    """Top-level orchestrator. Returns the four output paths."""
+    """Top-level orchestrator. Returns the four output paths.
+
+    `strict_grounding=True` means: if ANY section fails the grounding check, the
+    entire memo is re-rendered with MockLLM. Default (False) is per-section
+    fallback, which is usually friendlier.
+    """
     outputs_dir = Path(outputs_dir)
     outputs_dir.mkdir(parents=True, exist_ok=True)
 
@@ -410,7 +496,25 @@ def run_review(
         provider=resolution,
     )
 
-    narratives = _narrate_all(resolution.provider, facts)
+    mock_fallback = MockLLM() if resolution.name != "mock" else resolution.provider
+    report = _narrate_all(
+        resolution.provider,
+        facts,
+        strict_grounding=strict_grounding,
+        mock_for_fallback=mock_fallback,
+    )
+
+    # In strict mode, if anything fell back at the section level, re-render the
+    # whole memo from MockLLM so the document is uniform.
+    if strict_grounding and report.any_section_fell_back:
+        report = _narrate_all(
+            mock_fallback,
+            facts,
+            strict_grounding=False,
+            mock_for_fallback=mock_fallback,
+        )
+
+    narratives = report.narratives
     markdown = render_review_markdown(facts, narratives)
 
     md_path = write_review_markdown(markdown, outputs_dir / "monthly_district_review.md")
@@ -425,26 +529,56 @@ def run_review(
         "top_n_blocks": top_n_blocks,
         "top_n_actions": top_n_actions,
         "llm_provider": llm_provider,
+        "strict_grounding": bool(strict_grounding),
     }
     data_files_used = [Path(synthetic_dir) / fname for fname in CSV_FILES.values()]
     policy_docs_used = [POLICY_MAP_PATH] if POLICY_MAP_PATH.exists() else []
+
+    # Compose the fallback flag + reason from BOTH stages: factory-level
+    # (construction) and orchestration-level (any per-section fall-back).
+    section_fallback = report.any_section_fell_back
+    final_fallback_used = bool(resolution.fallback_used or section_fallback)
+    final_fallback_reason: str | None
+    if resolution.fallback_used and section_fallback:
+        final_fallback_reason = (
+            f"{resolution.fallback_reason}; section_fallbacks={sum(1 for m in report.section_metadata.values() if m['fallback_used'])}"
+        )
+    elif resolution.fallback_used:
+        final_fallback_reason = resolution.fallback_reason
+    elif section_fallback:
+        n_fb = sum(1 for m in report.section_metadata.values() if m["fallback_used"])
+        final_fallback_reason = f"section_fallbacks={n_fb}"
+    else:
+        final_fallback_reason = None
+
+    # The "actual" provider name for the AUDIT_LOG is the one that produced the
+    # majority of narrations. If anything fell back at construction time we never
+    # called the real provider at all, so this is just resolution.name.
+    actual_provider_name = resolution.name
+
     audit = build_audit_log(
         command_args=command_args,
         data_files_used=data_files_used,
         policy_docs_used=policy_docs_used,
-        llm_provider=resolution.name,
+        llm_provider=actual_provider_name,
         requested_llm_provider=resolution.requested,
-        fallback_used=resolution.fallback_used,
+        fallback_used=final_fallback_used,
         output_files=[md_path, actions_path, facts_path],
         risk_formula_version=RISK_MODEL_VERSION,
         risk_weights=RISK_WEIGHTS,
         timestamp=timestamp,
+        model_name=resolution.model,
+        fallback_reason=final_fallback_reason,
+        grounding_failures=report.grounding_failures,
+        provider_latency_ms=report.total_latency_ms,
+        section_metadata=report.section_metadata,
         extra={
             "district_schools": int(facts.get("schools", 0)),
             "district_blocks": int(facts.get("blocks", 0)),
             "data_quality_score": int(facts.get("data_quality_score", 0)),
             "health_score": int(facts.get("health_score", 0)),
             "band_split_percent": facts.get("band_split", {}),
+            "strict_grounding": bool(strict_grounding),
         },
     )
     audit_path = write_audit_log(audit, outputs_dir / "audit_log.json")
@@ -473,7 +607,18 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--top-n-schools", type=int, default=10)
     parser.add_argument("--top-n-blocks", type=int, default=5)
     parser.add_argument("--top-n-actions", type=int, default=10)
-    parser.add_argument("--llm-provider", type=str, default="mock")
+    parser.add_argument(
+        "--llm-provider",
+        type=str,
+        default="mock",
+        choices=["mock", "gemini", "groq", "ollama"],
+        help="LLM backend. 'mock' (default) is offline; others fall back to mock if unavailable.",
+    )
+    parser.add_argument(
+        "--strict-grounding",
+        action="store_true",
+        help="If any section fails the grounding check, re-render the entire memo with MockLLM.",
+    )
     parser.add_argument("--outputs-dir", type=Path, default=OUTPUTS_DIR)
     parser.add_argument("--synthetic-dir", type=Path, default=SYNTHETIC_DIR)
     return parser.parse_args(argv)
@@ -489,6 +634,7 @@ def main(argv: list[str] | None = None) -> int:
         top_n_blocks=args.top_n_blocks,
         top_n_actions=args.top_n_actions,
         llm_provider=args.llm_provider,
+        strict_grounding=args.strict_grounding,
         outputs_dir=args.outputs_dir,
         synthetic_dir=args.synthetic_dir,
     )

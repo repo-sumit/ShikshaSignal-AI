@@ -18,11 +18,17 @@ Run as a quick smoke test:
 from __future__ import annotations
 
 import json
+import time
 from typing import Mapping
 
 import jinja2
 
-from app.llm.base import SUPPORTED_SECTIONS, assert_supported
+from app.llm.base import (
+    SUPPORTED_SECTIONS,
+    BaseLLMProvider,
+    GenerationResult,
+    assert_supported,
+)
 
 
 # -----------------------------------------------------------------------------
@@ -106,10 +112,14 @@ This memo was generated from SYNTHETIC, public-safe data (see disclaimer above).
 }
 
 
-class MockLLM:
-    """Deterministic Jinja-based provider used as the project's default narrator."""
+class MockLLM(BaseLLMProvider):
+    """Deterministic Jinja-based provider used as the project's default narrator.
+
+    `model` is set to a stable tag so audit logs can distinguish MockLLM runs.
+    """
 
     name = "mock"
+    model = "jinja-templates-v1"
 
     def __init__(self) -> None:
         self._env = jinja2.Environment(
@@ -120,19 +130,48 @@ class MockLLM:
             lstrip_blocks=True,
         )
 
+    # ---- Patchable text-only API (Milestone 3 test surface) -----------------
+
     def generate_section(self, section_name: str, facts: Mapping[str, object]) -> str:
+        """Render the section as plain text.
+
+        This is the layer Milestone 3 tests monkeypatch to simulate hallucinated
+        output; keep it as the single place rendering happens so both old and new
+        callers see the same string.
+        """
         assert_supported(section_name)
         template_src = _TEMPLATES.get(section_name)
         if template_src is None:
             raise KeyError(f"No template registered for section {section_name!r}.")
         template = self._env.from_string(template_src)
-        # `_na` is exposed to templates so they have a single non-numeric placeholder
-        # for missing fields. Anything else is taken straight from facts.
         ctx: dict[str, object] = {"_na": _NA}
         ctx.update(facts)
         rendered = template.render(**ctx)
-        # Collapse multiple blank lines that Jinja sometimes leaves between blocks.
+        # Collapse blank lines that Jinja sometimes leaves between blocks.
         return "\n".join(line.rstrip() for line in rendered.splitlines() if line.strip()).strip()
+
+    # ---- New `generate(...) -> GenerationResult` path -----------------------
+    # Delegates to generate_section so any monkeypatch of the text-only seam
+    # propagates here too (the M3 grounding-injection test relies on this).
+
+    def generate(self, section_name: str, facts: Mapping[str, object]) -> GenerationResult:
+        t0 = time.perf_counter()
+        try:
+            text = self.generate_section(section_name, facts)
+            return GenerationResult(
+                text=text,
+                provider_name=self.name,
+                model=self.model,
+                latency_ms=(time.perf_counter() - t0) * 1000,
+            )
+        except Exception as e:  # pragma: no cover - mock should not fail in practice
+            return GenerationResult(
+                text="",
+                provider_name=self.name,
+                model=self.model,
+                latency_ms=(time.perf_counter() - t0) * 1000,
+                error=str(e),
+            )
 
 
 def main() -> None:

@@ -10,8 +10,10 @@
 explainable risk ranking, and action tracker** a PMU analyst hand-builds before every DEO review —
 with **every number deterministic, traceable, and auditable**.
 
-This repo is being built in validated phases. **You are looking at Phase 1: the deterministic
-analytics core, with no AI/LLM involved.** (See `docs`/the plan for the full phased roadmap.)
+This repo is built in validated phases. The deterministic core (M1) and the District
+Review Compiler (M3) are in. **Milestone 4 adds optional free / local LLM providers
+(Gemini, Groq, Ollama) behind the same interface, with safe fallback to MockLLM** —
+the project still runs fully offline with zero API keys by default.
 
 ---
 
@@ -63,6 +65,94 @@ pytest -q
 The first command writes five CSVs to `data/synthetic/`. The risk-score command prints a believable
 **~55% Low / ~30% Medium / ~15% High** band split and highlights one clear "problem block" — the
 earliest signal that the data and risk core are credible *before any AI is added*.
+
+---
+
+## Run (Milestone 3 — Monthly District Review Compiler, offline-default)
+
+```bash
+# Compile the four review artifacts using the default offline MockLLM
+python -m app.review --district "District Alpha" --period 2026-05
+```
+
+Writes:
+- `outputs/monthly_district_review.md` — the review memo
+- `outputs/action_tracker.csv` — proposed actions (status: `proposed`)
+- `outputs/review_facts.json` — the verified facts every memo number must trace to
+- `outputs/audit_log.json` — run lineage (provider, model, fallback flag, files)
+
+---
+
+## Run (Milestone 4 — optional free / local LLM providers)
+
+MockLLM remains the safest default — no API keys, no network, deterministic, grounded
+by construction. Real providers are wired behind the same interface and **never fail
+the review**: missing credentials, network errors, or grounding violations all fall
+back to MockLLM and are logged in `audit_log.json`.
+
+```bash
+# Offline default (no keys, no network) — always works
+python -m app.review --district "District Alpha" --period 2026-05 --llm-provider mock
+
+# Google Gemini (free tier) — needs GOOGLE_API_KEY (or GEMINI_API_KEY) in env
+python -m app.review --district "District Alpha" --period 2026-05 --llm-provider gemini
+
+# Groq (free tier) — needs GROQ_API_KEY in env
+python -m app.review --district "District Alpha" --period 2026-05 --llm-provider groq
+
+# Local Ollama — needs a running daemon at OLLAMA_BASE_URL (default localhost:11434)
+python -m app.review --district "District Alpha" --period 2026-05 --llm-provider ollama
+
+# Strict mode: any grounding failure rerenders the whole memo with MockLLM
+python -m app.review --district "District Alpha" --period 2026-05 \
+       --llm-provider gemini --strict-grounding
+```
+
+Environment variables (see `.env.example`):
+
+| Variable | Used by | Default |
+| --- | --- | --- |
+| `LLM_PROVIDER` | global selector (overridden by `--llm-provider`) | `mock` |
+| `GOOGLE_API_KEY` / `GEMINI_API_KEY` | Gemini | _(unset)_ |
+| `GEMINI_MODEL` | Gemini | `gemini-1.5-flash` |
+| `GROQ_API_KEY` | Groq | _(unset)_ |
+| `GROQ_MODEL` | Groq | `llama-3.1-8b-instant` |
+| `OLLAMA_BASE_URL` | Ollama | `http://localhost:11434` |
+| `OLLAMA_MODEL` | Ollama | `qwen2.5:7b` |
+
+### Safety guarantees (enforced by tests)
+
+1. **The LLM never computes or invents numbers.** Every numeric token in the memo is
+   checked against `review_facts.json` by `app.eval.grounding`; ungrounded numbers
+   trigger a fallback for that section.
+2. **The review never crashes because an optional provider is unavailable.** Missing
+   keys or network errors fall back to MockLLM with `fallback_used=true` and a
+   `fallback_reason` recorded in `audit_log.json`.
+3. **Root causes stay labelled as hypotheses** requiring field verification.
+4. **Actions always start as `proposed`.** Human approval is a downstream concern.
+5. **No paid API is required for the project to run** — MockLLM is feature-complete.
+
+### What goes in the audit log (Milestone 4)
+
+```json
+{
+  "llm_provider": "gemini",
+  "actual_llm_provider": "gemini",
+  "requested_llm_provider": "gemini",
+  "model_name": "gemini-1.5-flash",
+  "fallback_used": true,
+  "fallback_reason": "section_fallbacks=2",
+  "grounding_failures": { "executive_summary": ["13.7"] },
+  "provider_latency_ms": 4831.22,
+  "section_metadata": {
+    "executive_summary": {"provider": "mock", "model": "jinja-templates-v1",
+                          "fallback_used": true,
+                          "fallback_reason": "grounding_failed: 1 ungrounded token(s)"},
+    "what_changed": {"provider": "gemini", "fallback_used": false, ...},
+    "...": "..."
+  }
+}
+```
 
 ---
 
