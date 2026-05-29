@@ -63,7 +63,12 @@ from app.tools.kpi_calculator import (
     load_policy_targets,
 )
 from app.tools.rankings import build_school_ranking, whats_changed
-from app.tools.risk_score import band_split, compute_block_risk, compute_school_risk
+from app.tools.risk_score import (
+    band_split,
+    compute_block_risk,
+    compute_school_risk,
+    get_active_risk_config,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -556,6 +561,7 @@ def run_review(
     # called the real provider at all, so this is just resolution.name.
     actual_provider_name = resolution.name
 
+    risk_cfg = get_active_risk_config()
     audit = build_audit_log(
         command_args=command_args,
         data_files_used=data_files_used,
@@ -564,8 +570,10 @@ def run_review(
         requested_llm_provider=resolution.requested,
         fallback_used=final_fallback_used,
         output_files=[md_path, actions_path, facts_path],
-        risk_formula_version=RISK_MODEL_VERSION,
-        risk_weights=RISK_WEIGHTS,
+        risk_formula_version=risk_cfg.version,
+        risk_weights=risk_cfg.weights,
+        risk_config_path=risk_cfg.source_path,
+        risk_config_source=risk_cfg.source_kind,
         timestamp=timestamp,
         model_name=resolution.model,
         fallback_reason=final_fallback_reason,

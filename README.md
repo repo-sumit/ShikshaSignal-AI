@@ -90,8 +90,8 @@ data flow.
 | M3 | Review compiler + MockLLM narrator + markdown / action / audit reporting + grounding eval | Done |
 | M4 | Free / local LLM providers (Gemini, Groq, Ollama) + factory + fallback semantics | Done |
 | M5 | Local Streamlit viewer over existing artifacts | Done |
-| M6 | Demo polish: one-command runner, sample outputs, docs, expanded tests | In progress |
-| M7 | Demo data quality + UX polish | Planned |
+| M6 | Demo polish: one-command runner, sample outputs, portfolio docs, expanded tests | Done |
+| M7 | Real-use readiness layer: configurable KPI/risk, schema specs, import validator, mapping templates, Data Readiness tab | In progress |
 | M8 | LangGraph single orchestrator (plan → tools → narrate → ground → approve) | Planned |
 | M9 | Action tracker persistence + carry-over closure across periods | Planned |
 | M10 | Packaged local demo or thin synthetic-data hosted demo | Planned |
@@ -105,6 +105,7 @@ Full roadmap: [`docs/ROADMAP.md`](docs/ROADMAP.md).
 ```bash
 pip install -r requirements.txt
 python scripts/generate_synthetic_data.py --seed 42
+python -m app.tools.import_validator
 python scripts/ingest_policy_docs.py
 python scripts/run_local_demo.py
 python -m streamlit run frontend/streamlit_app.py
@@ -165,7 +166,47 @@ re-renders the entire memo with MockLLM if any section failed grounding.
 | `outputs/monthly_district_review.md` | Executive summary, what changed, hypotheses, recommendations, assumptions footer | Every numeric token validated against `review_facts.json` by `app.eval.grounding`; failed sections fall back to MockLLM |
 | `outputs/action_tracker.csv` | Proposed actions with owner role, priority, evidence pointer, `status=proposed` | Generated deterministically from risk + KPI tables, not from LLM output |
 | `outputs/review_facts.json` | Canonical computed numbers (KPIs, risk components, deltas, ranks) | Produced by deterministic Python only — the single source of truth |
-| `outputs/audit_log.json` | Run lineage: provider, model, fallback flags, latency, files used, risk model version | Written from `app.reporting.audit_log`; no LLM input |
+| `outputs/audit_log.json` | Run lineage: provider, model, fallback flags, latency, files used, risk model version + config path | Written from `app.reporting.audit_log`; no LLM input |
+| `outputs/import_validation_report.{md,json}` | Per-CSV readiness report: presence, columns, PK uniqueness, FK match rate, planted-pathology findings, verdict | Pure deterministic check against `schemas/input_schemas.yaml`; no LLM input |
+
+## Real-use readiness (Milestone 7)
+
+The synthetic demo is the default. Milestone 7 adds the layer a PMU analyst
+would need before pointing the compiler at **aggregate, public-safe, approved**
+CSV exports — without unlocking real student-level data, real APIs, or any
+outbound messaging.
+
+| Capability | File | Purpose |
+| --- | --- | --- |
+| Configurable risk weights | [`config/risk_weights.yaml`](config/risk_weights.yaml) | Edit the 7 risk-component weights. Validator enforces they sum to 1.0 and use known component names. |
+| Configurable KPI targets | [`config/kpi_targets.yaml`](config/kpi_targets.yaml) | Edit the policy-linked KPI targets used in the memo's target-vs-actual table. Wins over the legacy `data/policy_map.yaml`. |
+| Input schema spec | [`schemas/input_schemas.yaml`](schemas/input_schemas.yaml) | Declarative contract for the five CSVs (required cols, types, enums, primary + foreign keys, forbidden-fields list). |
+| Import validator | [`app/tools/import_validator.py`](app/tools/import_validator.py) | `python -m app.tools.import_validator` → markdown + JSON readiness report; verdict ∈ {Ready, Ready with warnings, Not ready}. |
+| Mapping template | [`docs/templates/real_data_mapping_template.md`](docs/templates/real_data_mapping_template.md) + [`.csv`](docs/templates/real_data_mapping_template.csv) | One row per ShikshaSignal target column, ready for an analyst to fill in source-system / source-column / transformation against an aggregate export. |
+| Readiness guide | [`docs/REAL_USE_READINESS.md`](docs/REAL_USE_READINESS.md) | Pilot scope, required approvals, security/governance checklist, CSV-first workflow. Pilot-only — **not** production deployment guidance. |
+| Streamlit Data Readiness tab | [`frontend/streamlit_app.py`](frontend/streamlit_app.py) | Visualises the validator's verdict, per-file results, and individual findings inside the viewer. |
+
+Validator usage:
+
+```bash
+python -m app.tools.import_validator                    # writes outputs/import_validation_report.{md,json}
+python -m app.tools.import_validator --source-dir path/to/csvs --outputs-dir path/to/out
+```
+
+> The validator exits non-zero only when the verdict is **Not ready** (errors
+> present). Warnings exit 0, so this can be wired into pre-commit / CI loops
+> without false positives.
+
+The audit log records the active risk config — so every review is traceable
+back to the exact `risk_weights.yaml` (or the built-in fallback) that produced
+its scores:
+
+```json
+"risk_formula_version": "1.0",
+"risk_weights": { "learning_outcome": 0.25, "digital_usage": 0.20, ... },
+"risk_config_path": ".../config/risk_weights.yaml",
+"risk_config_source": "yaml"
+```
 
 ## Safety and governance
 

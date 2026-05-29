@@ -1,0 +1,36 @@
+# ShikshaSignal AI — risk model weights (configurable).
+#
+# These weights drive the decomposed risk score in `app.tools.risk_score`. Each
+# component is a 0-100 sub-score (higher = worse); the headline score is the
+# weighted sum, then mapped to a band (Low / Medium / High).
+#
+# Hard rules:
+#   - Every component listed under `weights:` must appear in the registry below.
+#   - All weights must be in [0, 1].
+#   - Weights must sum to 1.0 (tolerance 0.001).
+#   - `version` is stamped into every audit_log.json so a model change cannot be
+#     confused with an old one.
+#
+# The shipped default mirrors `app.config.RISK_WEIGHTS`. Edit the numbers below
+# only after running `pytest -q` and reading docs/EVALUATION.md.
+
+version: "1.0"
+description: >
+  Default risk model weights. Government reviewers prefer a few well-justified
+  components over a black-box score; each weight below maps to a named driver
+  that the action tracker can cite as evidence.
+
+weights:
+  learning_outcome: 0.25   # FLN gain + proficiency gap
+  digital_usage:    0.20   # DIKSHA sessions vs benchmark + connectivity
+  teacher_training: 0.15   # NISHTHA / FLN completion shortfall
+  infrastructure:   0.15   # infra score + device / internet availability
+  field_issues:     0.10   # open Critical/High issues, severity-weighted
+  data_availability: 0.10  # weeks reported vs expected
+  data_quality:     0.05   # invalid completion %, missing scores, dq flags
+
+# Bands map the 0-100 weighted score to a label. Half-open intervals; no gaps.
+bands:
+  - {label: "Low",    min: 0.0,   max: 40.0}
+  - {label: "Medium", min: 40.0,  max: 70.0}
+  - {label: "High",   min: 70.0,  max: 100.0001}

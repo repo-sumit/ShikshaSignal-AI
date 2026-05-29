@@ -1,0 +1,64 @@
+# ShikshaSignal AI — KPI targets (configurable).
+#
+# This is the canonical KPI-to-target lookup table consumed by the review
+# compiler. It is the deterministic stand-in for "policy RAG" in this phase —
+# six well-justified rows beat a vector store over six short docs.
+#
+# Mirrors / supersedes data/policy_map.yaml. If both exist, this file wins.
+# The loader is in `app.services.config_loader.load_kpi_targets`.
+#
+# Hard rules:
+#   - Every row needs label, target, direction, source.
+#   - `direction` must be `higher_is_better` or `lower_is_better`.
+#   - `target` must be numeric (int or float).
+#   - The keys here must match the `actuals` dict in
+#     `app.tools.kpi_calculator.district_summary`.
+
+version: "1.0"
+description: >
+  KPI targets sourced from publicly known education-program mandates.
+  Targets are used in `target-vs-actual` framing in the review memo and in
+  the policy-linked observations table.
+
+targets:
+  diksha_sessions_per_school_weekly:
+    label: "Avg weekly DIKSHA sessions per school"
+    target: 50
+    direction: higher_is_better
+    source: "Digital Learning Adoption Guideline"
+    note: "Expected average weekly DIKSHA sessions per active school."
+
+  teacher_training_completion_pct:
+    label: "Teacher training completion"
+    target: 80
+    direction: higher_is_better
+    source: "Teacher Training Circular 2025 (NISHTHA/FLN)"
+    note: "Minimum module completion expected by mid-cycle."
+
+  fln_proficiency_pct:
+    label: "FLN proficiency (children at grade level)"
+    target: 60
+    direction: higher_is_better
+    source: "NIPUN Bharat Mission"
+    note: "Share of children at grade-level FLN; mission goal is universal by Grade 3."
+
+  fln_gain_points:
+    label: "FLN improvement (baseline to endline)"
+    target: 12
+    direction: higher_is_better
+    source: "NIPUN Bharat / FLN Goals"
+    note: "Expected baseline-to-endline improvement over a full cycle."
+
+  open_critical_issues:
+    label: "Open critical field issues"
+    target: 0
+    direction: lower_is_better
+    source: "District Review Circular"
+    note: "No critical field issues should remain open at review time."
+
+  usage_coverage_pct:
+    label: "Usage reporting coverage"
+    target: 90
+    direction: higher_is_better
+    source: "District Review Circular"
+    note: "Share of schools reporting platform usage in the review period."

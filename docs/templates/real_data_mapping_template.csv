@@ -1,0 +1,47 @@
+source_system,source_file,source_column,target_file,target_column,transformation,required,owner,validation_notes
+EXAMPLE: DIKSHA aggregate export,EXAMPLE: school_master_2026_04.csv,EXAMPLE: udise_code,schools.csv,school_id,EXAMPLE: rename; ensure unique,yes,EXAMPLE: District PMU analyst,primary key; must be unique across schools.csv
+,,,schools.csv,school_name,,yes,,string; display name (synthetic - do not use real student-identifying labels)
+,,,schools.csv,state,,yes,,string
+,,,schools.csv,district,,yes,,string
+,,,schools.csv,block,,yes,,string
+,,,schools.csv,cluster,,yes,,"string; required so CRC actions can be routed"
+,,,schools.csv,school_type,,yes,,string
+,,,schools.csv,lowest_grade,,yes,,int; range 1-12
+,,,schools.csv,highest_grade,,yes,,int; range 1-12
+,,,schools.csv,enrollment,,yes,,int; min 1; aggregate count only
+,,,schools.csv,teachers_count,,yes,,int; min 1; aggregate count only
+,,,schools.csv,internet_available,,yes,,bool (true/false)
+,,,schools.csv,device_available,,yes,,bool (true/false)
+,,,schools.csv,infrastructure_score,,yes,,float; range 0-100
+EXAMPLE: DIKSHA aggregate export,EXAMPLE: diksha_weekly_usage_2026.csv,EXAMPLE: dise_code,diksha_usage.csv,school_id,EXAMPLE: rename; FK to schools.school_id,yes,EXAMPLE: District PMU analyst,"foreign key; must exist in schools.school_id"
+,,,diksha_usage.csv,week,,yes,,"ISO week YYYY-Www (e.g. 2026-W18)"
+,,,diksha_usage.csv,qr_scans,,yes,,int; min 0
+,,,diksha_usage.csv,sessions,,yes,,int; min 0
+,,,diksha_usage.csv,learning_minutes,,yes,,int; min 0
+,,,diksha_usage.csv,active_teachers,,yes,,int; min 0; aggregate count only
+,,,diksha_usage.csv,active_students_proxy,,yes,,int; min 0; aggregate proxy - NEVER per-student
+EXAMPLE: District assessment portal,EXAMPLE: assessment_results_2026.csv,EXAMPLE: school_code,assessments.csv,school_id,EXAMPLE: rename; FK to schools.school_id,yes,EXAMPLE: District PMU analyst,"foreign key; must exist in schools.school_id"
+,,,assessments.csv,grade,,yes,,int; range 1-12
+,,,assessments.csv,subject,,yes,,string
+,,,assessments.csv,assessment_round,,yes,,"enum: baseline|midline|endline"
+,,,assessments.csv,baseline_score,,yes,,float; range 0-100; aggregate score only
+,,,assessments.csv,current_score,,yes,,float; range 0-100; may be NULL; aggregate score only
+,,,assessments.csv,district_average,,yes,,float; range 0-100
+,,,assessments.csv,proficiency_band,,yes,,"enum: below|approaching|meets|exceeds"
+EXAMPLE: NISHTHA / training MIS,EXAMPLE: teacher_training_status.csv,EXAMPLE: trainee_code,teacher_training.csv,teacher_id,EXAMPLE: hash/anonymise; never use real teacher ID,yes,EXAMPLE: District PMU analyst,"synthetic ID; never a real teacher ID; primary key"
+,,,teacher_training.csv,school_id,,yes,,"foreign key; must exist in schools.school_id"
+,,,teacher_training.csv,course_name,,yes,,string
+,,,teacher_training.csv,status,,yes,,"enum: not_started|in_progress|completed"
+,,,teacher_training.csv,completion_percent,,yes,,float; range 0-100
+,,,teacher_training.csv,assessment_score,,yes,,float; range 0-100; may be NULL
+,,,teacher_training.csv,last_activity_date,,yes,,"date (YYYY-MM-DD); used for stale-record checks"
+EXAMPLE: Field issue tracker,EXAMPLE: field_issues_export.csv,EXAMPLE: ticket_id,field_issues.csv,issue_id,EXAMPLE: rename; ensure unique,yes,EXAMPLE: District PMU analyst,string; primary key; must be unique
+,,,field_issues.csv,school_id,,yes,,"foreign key; must exist in schools.school_id"
+,,,field_issues.csv,issue_type,,yes,,"enum: infra|content|device|attendance|training|other"
+,,,field_issues.csv,severity,,yes,,"enum: low|med|high|critical"
+,,,field_issues.csv,status,,yes,,"enum: open|in_progress|resolved"
+,,,field_issues.csv,reported_by,,yes,,"role / channel, not a real name"
+,,,field_issues.csv,description,,yes,,"string; redact PII before mapping"
+,,,field_issues.csv,created_at,,yes,,"date (YYYY-MM-DD); must not be in the future"
+,,,field_issues.csv,resolved_at,,yes,,"date (YYYY-MM-DD); NULL while issue is open"
+NOTE,THIS IS A TEMPLATE,Fill in offline; keep with the data-sharing agreement; do NOT commit filled copies.,,,,,,

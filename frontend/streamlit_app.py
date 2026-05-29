@@ -62,7 +62,7 @@ st.set_page_config(
 # --------------------------------------------------------------------------------------
 st.title("ShikshaSignal AI")
 st.subheader("Monthly District Review Agent — Local Viewer")
-st.caption("Milestone 5 · Streamlit Review Viewer · local demo · synthetic data only")
+st.caption("Local viewer · synthetic data only · Milestones 5 (viewer) + 7 (data readiness)")
 st.warning(
     "⚠ **SYNTHETIC DATA.** All inputs are synthetic and public-safe — no real student, "
     "teacher, school, or district information is processed. LLMs only narrate verified "
@@ -258,8 +258,15 @@ else:
 # Tabs — Review Memo · Risk Ranking · Action Tracker · Audit Log · Review Facts
 # --------------------------------------------------------------------------------------
 st.divider()
-tab_memo, tab_risk, tab_actions, tab_audit, tab_facts = st.tabs(
-    ["📝 Review Memo", "📊 Risk Ranking", "✅ Action Tracker", "🔍 Audit Log", "🧾 Review Facts"]
+tab_memo, tab_risk, tab_actions, tab_audit, tab_facts, tab_readiness = st.tabs(
+    [
+        "📝 Review Memo",
+        "📊 Risk Ranking",
+        "✅ Action Tracker",
+        "🔍 Audit Log",
+        "🧾 Review Facts",
+        "🩺 Data Readiness",
+    ]
 )
 
 
@@ -426,6 +433,109 @@ with tab_facts:
             file_name="review_facts.json",
             mime="application/json",
             use_container_width=True,
+        )
+
+
+# ---- Data Readiness (Milestone 7) -------------------------------------------
+with tab_readiness:
+    st.subheader("Data Readiness (`outputs/import_validation_report.json`)")
+    st.caption(
+        "Synthetic data by default. Real aggregate exports must be approved and "
+        "mapped via `docs/templates/real_data_mapping_template.csv` first — see "
+        "[`docs/REAL_USE_READINESS.md`](../docs/REAL_USE_READINESS.md). "
+        "**Never load per-student, Aadhaar/APAAR, or other identifying data.**"
+    )
+
+    validation_paths = output_paths(OUTPUTS_DIR)
+    validation_json = read_json(validation_paths.get("validation_json") or paths.get("validation_json")) \
+        if False else read_json(OUTPUTS_DIR / "import_validation_report.json")
+    validation_md = read_markdown(OUTPUTS_DIR / "import_validation_report.md")
+
+    if not validation_json:
+        st.info(
+            "No import validation report yet. Run this from your terminal to produce one:\n\n"
+            "```bash\npython -m app.tools.import_validator\n```"
+        )
+    else:
+        verdict = validation_json.get("verdict", "Unknown")
+        summary = validation_json.get("summary") or {}
+        files = validation_json.get("files") or []
+
+        verdict_color = {
+            "Ready": "🟢",
+            "Ready with warnings": "🟡",
+            "Not ready": "🔴",
+        }.get(verdict, "⚪")
+
+        st.markdown(f"### {verdict_color} Verdict: **{verdict}**")
+
+        rc1, rc2, rc3, rc4 = st.columns(4)
+        rc1.metric("Files present", f"{summary.get('files_present', 0)} / "
+                                    f"{summary.get('files_present', 0) + summary.get('files_missing', 0)}")
+        rc2.metric("Total rows", f"{summary.get('total_rows', 0):,}")
+        rc3.metric("Errors", summary.get("errors", 0))
+        rc4.metric("Warnings", summary.get("warnings", 0))
+
+        st.markdown("#### Per-file results")
+        per_file = pd.DataFrame([
+            {
+                "file": r.get("file"),
+                "present": r.get("present"),
+                "rows": r.get("rows"),
+                "missing_cols": len(r.get("required_columns_missing") or []),
+                "unexpected_cols": len(r.get("unexpected_columns") or []),
+                "pk_unique": r.get("primary_key_unique"),
+                "fk_match_%": r.get("foreign_key_match_rate"),
+                "errors": sum(1 for f in (r.get("findings") or []) if f.get("severity") == "error"),
+                "warnings": sum(1 for f in (r.get("findings") or []) if f.get("severity") == "warning"),
+            }
+            for r in files
+        ])
+        st.dataframe(per_file, use_container_width=True, hide_index=True)
+
+        # Surface every finding so the analyst can act on them.
+        all_findings: list[dict] = []
+        for r in files:
+            for f in r.get("findings") or []:
+                all_findings.append({
+                    "file": r.get("file"),
+                    "severity": f.get("severity"),
+                    "code": f.get("code"),
+                    "column": f.get("column"),
+                    "detail": f.get("detail"),
+                    "sample": ", ".join(f.get("sample") or []),
+                })
+        if all_findings:
+            st.markdown("#### Findings")
+            st.dataframe(pd.DataFrame(all_findings), use_container_width=True, hide_index=True)
+        else:
+            st.success("No findings — every check passed.")
+
+        col_dl1, col_dl2 = st.columns(2)
+        if validation_md:
+            col_dl1.download_button(
+                "Download import_validation_report.md",
+                data=validation_md.encode("utf-8"),
+                file_name="import_validation_report.md",
+                mime="text/markdown",
+                use_container_width=True,
+            )
+        col_dl2.download_button(
+            "Download import_validation_report.json",
+            data=json.dumps(validation_json, indent=2).encode("utf-8"),
+            file_name="import_validation_report.json",
+            mime="application/json",
+            use_container_width=True,
+        )
+
+        st.markdown(
+            f"_Schema spec: `{validation_json.get('schema_source', '—')}` · "
+            f"Reference date: {validation_json.get('reference_date', '—')}_"
+        )
+        st.info(
+            "To regenerate: `python -m app.tools.import_validator`. "
+            "Real aggregate data must still go through the approvals checklist in "
+            "[`docs/REAL_USE_READINESS.md`](../docs/REAL_USE_READINESS.md) before use."
         )
 
 

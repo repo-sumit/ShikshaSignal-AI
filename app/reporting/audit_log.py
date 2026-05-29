@@ -46,6 +46,9 @@ class AuditLog:
     grounding_failures: dict = field(default_factory=dict)   # section -> [tokens]
     provider_latency_ms: float = 0.0   # summed across all section calls
     section_metadata: dict = field(default_factory=dict)     # section -> dict
+    # ---- Milestone 7 additions ----
+    risk_config_path: str = ""        # path of the YAML config in effect (or "builtin:...")
+    risk_config_source: str = ""      # "yaml" | "builtin"
     # -------------------------------
     synthetic_data_notice: str = SYNTHETIC_DATA_NOTICE
     extra: dict = field(default_factory=dict)
@@ -69,6 +72,8 @@ class AuditLog:
             "output_files": list(self.output_files),
             "risk_formula_version": self.risk_formula_version,
             "risk_weights": self.risk_weights,
+            "risk_config_path": self.risk_config_path,
+            "risk_config_source": self.risk_config_source,
             "synthetic_data_notice": self.synthetic_data_notice,
             "extra": self.extra,
         }
@@ -96,6 +101,8 @@ def build_audit_log(
     grounding_failures: dict | None = None,
     provider_latency_ms: float = 0.0,
     section_metadata: dict | None = None,
+    risk_config_path: str = "",
+    risk_config_source: str = "",
 ) -> AuditLog:
     ts = timestamp or datetime.now(timezone.utc).isoformat(timespec="seconds")
     return AuditLog(
@@ -116,6 +123,8 @@ def build_audit_log(
         grounding_failures=dict(grounding_failures or {}),
         provider_latency_ms=float(provider_latency_ms),
         section_metadata=dict(section_metadata or {}),
+        risk_config_path=str(risk_config_path),
+        risk_config_source=str(risk_config_source),
         extra=dict(extra or {}),
     )
 

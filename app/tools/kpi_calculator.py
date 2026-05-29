@@ -26,6 +26,15 @@ FLN_AT_GRADE_LEVEL = 50.0
 
 
 def load_policy_targets() -> dict:
+    """Return KPI targets. Prefers ``config/kpi_targets.yaml`` (Milestone 7);
+    falls back to the legacy ``data/policy_map.yaml`` so older tests pass."""
+    # Imported lazily to avoid a circular import with app.services.
+    from app.services.config_loader import load_kpi_targets
+
+    cfg = load_kpi_targets()
+    if cfg.targets:
+        return dict(cfg.targets)
+    # Legacy direct read kept for environments without either config file.
     if not POLICY_MAP_PATH.exists():
         return {}
     with open(POLICY_MAP_PATH, "r", encoding="utf-8") as fh:

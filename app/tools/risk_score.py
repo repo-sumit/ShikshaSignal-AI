@@ -24,11 +24,32 @@ from app.config import (
     USAGE_SESSIONS_BENCHMARK,
     band_for_score,
 )
+from app.services.config_loader import RiskConfig, load_risk_config
 from app.tools.csv_loader import Tables, load_all
 from app.tools.data_quality import assess_quality
 from app.tools.kpi_calculator import compute_school_kpis
 
+# Component order is fixed by the in-code RISK_WEIGHTS dict; the YAML config just
+# overrides the values. Tests verify the YAML and the in-code dict use the same keys.
 COMPONENTS = list(RISK_WEIGHTS.keys())
+
+# Cached lazily so we read the YAML at most once per process. Tests can force a
+# reload by calling `set_active_risk_config(load_risk_config(...))`.
+_ACTIVE_RISK_CONFIG: RiskConfig | None = None
+
+
+def get_active_risk_config() -> RiskConfig:
+    """Return the currently active RiskConfig (YAML if present, else builtin)."""
+    global _ACTIVE_RISK_CONFIG
+    if _ACTIVE_RISK_CONFIG is None:
+        _ACTIVE_RISK_CONFIG = load_risk_config()
+    return _ACTIVE_RISK_CONFIG
+
+
+def set_active_risk_config(config: RiskConfig) -> None:
+    """Override the active config (useful for tests / CLI flags)."""
+    global _ACTIVE_RISK_CONFIG
+    _ACTIVE_RISK_CONFIG = config
 
 # Human-readable metric snippets used in the per-school explanation.
 _DRIVER_LABEL = {
@@ -82,12 +103,14 @@ def compute_school_risk(tables: Tables) -> pd.DataFrame:
     df["data_quality"] = _clip(df["dq_invalid_count"].fillna(0) * 30)
 
     # ---- Weighted score + band ---------------------------------------------------------
-    df["risk_score"] = sum(df[c] * w for c, w in RISK_WEIGHTS.items()).round(1)
+    cfg = get_active_risk_config()
+    weights = cfg.weights
+    df["risk_score"] = sum(df[c] * weights[c] for c in COMPONENTS).round(1)
     df["risk_band"] = df["risk_score"].apply(band_for_score)
-    df["risk_model_version"] = RISK_MODEL_VERSION
+    df["risk_model_version"] = cfg.version
 
     # ---- Top 2 weighted drivers + explanation ------------------------------------------
-    contrib = pd.DataFrame({c: df[c] * RISK_WEIGHTS[c] for c in COMPONENTS}, index=df.index)
+    contrib = pd.DataFrame({c: df[c] * weights[c] for c in COMPONENTS}, index=df.index)
     df["top_drivers"] = [
         ", ".join(contrib.loc[i].sort_values(ascending=False).head(2).index) for i in df.index
     ]

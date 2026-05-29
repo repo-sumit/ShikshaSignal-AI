@@ -1,0 +1,148 @@
+# ShikshaSignal AI — declarative input schema specification.
+#
+# Companion to `app/schemas/tables.py` (Pydantic row models). This YAML is the
+# *documented* contract a PMU analyst reads before mapping real aggregate
+# exports onto the project's CSV shape (see docs/REAL_USE_READINESS.md and
+# docs/templates/real_data_mapping_template.md).
+#
+# Hard rules consumed by the import validator
+# (`python -m app.tools.import_validator`):
+#   - Every column in `required_columns` MUST be present.
+#   - Columns in `optional_columns` MAY be present.
+#   - Columns NOT in either list trigger a warning, never a fatal error
+#     (configurable via the validator).
+#   - `primary_key` is unique within the file.
+#   - `foreign_keys` must resolve into the referenced file/column.
+#   - Values listed under `enums` are the only accepted values.
+#
+# Types: string | int | float | bool | date | iso_week | enum
+
+version: "1.0"
+
+files:
+
+  # --------------------------------------------------------------------------
+  # schools.csv — one row per school. The dimension table every fact table
+  # joins back to via school_id.
+  # --------------------------------------------------------------------------
+  schools:
+    file: "schools.csv"
+    grain: "one row per school"
+    primary_key: "school_id"
+    foreign_keys: []
+    required_columns:
+      - {name: school_id,            type: string, description: "Stable, unique school identifier"}
+      - {name: school_name,          type: string, description: "Display name (synthetic)"}
+      - {name: state,                type: string}
+      - {name: district,             type: string}
+      - {name: block,                type: string}
+      - {name: cluster,              type: string, description: "Required so CRC actions can be routed"}
+      - {name: school_type,          type: string}
+      - {name: lowest_grade,         type: int, min: 1, max: 12}
+      - {name: highest_grade,        type: int, min: 1, max: 12}
+      - {name: enrollment,           type: int, min: 1}
+      - {name: teachers_count,       type: int, min: 1}
+      - {name: internet_available,   type: bool}
+      - {name: device_available,     type: bool}
+      - {name: infrastructure_score, type: float, min: 0, max: 100}
+    optional_columns: []
+
+  # --------------------------------------------------------------------------
+  # diksha_usage.csv — school x week (the "what changed" engine)
+  # --------------------------------------------------------------------------
+  diksha_usage:
+    file: "diksha_usage.csv"
+    grain: "one row per (school, ISO week)"
+    primary_key: ["school_id", "week"]
+    foreign_keys:
+      - {column: school_id, references: "schools.school_id"}
+    required_columns:
+      - {name: school_id,             type: string}
+      - {name: week,                  type: iso_week, description: "ISO week, e.g. 2026-W18"}
+      - {name: qr_scans,              type: int, min: 0}
+      - {name: sessions,              type: int, min: 0}
+      - {name: learning_minutes,      type: int, min: 0}
+      - {name: active_teachers,       type: int, min: 0}
+      - {name: active_students_proxy, type: int, min: 0, description: "Aggregate proxy; NEVER per-student"}
+    optional_columns: []
+
+  # --------------------------------------------------------------------------
+  # assessments.csv — sparse waves, not weekly
+  # --------------------------------------------------------------------------
+  assessments:
+    file: "assessments.csv"
+    grain: "one row per (school, grade, subject, assessment_round)"
+    primary_key: ["school_id", "grade", "subject", "assessment_round"]
+    foreign_keys:
+      - {column: school_id, references: "schools.school_id"}
+    required_columns:
+      - {name: school_id,        type: string}
+      - {name: grade,            type: int, min: 1, max: 12}
+      - {name: subject,          type: string}
+      - {name: assessment_round, type: enum, enums: ["baseline", "midline", "endline"]}
+      - {name: baseline_score,   type: float, min: 0, max: 100}
+      - {name: current_score,    type: float, min: 0, max: 100, nullable: true}
+      - {name: district_average, type: float, min: 0, max: 100}
+      - {name: proficiency_band, type: enum, enums: ["below", "approaching", "meets", "exceeds"]}
+    optional_columns: []
+
+  # --------------------------------------------------------------------------
+  # teacher_training.csv — one row per teacher (not per training event)
+  # --------------------------------------------------------------------------
+  teacher_training:
+    file: "teacher_training.csv"
+    grain: "one row per teacher (current state of their training bundle)"
+    primary_key: "teacher_id"
+    foreign_keys:
+      - {column: school_id, references: "schools.school_id"}
+    required_columns:
+      - {name: teacher_id,          type: string, description: "Synthetic ID; never a real teacher ID"}
+      - {name: school_id,           type: string}
+      - {name: course_name,         type: string}
+      - {name: status,              type: enum, enums: ["not_started", "in_progress", "completed"]}
+      - {name: completion_percent,  type: float, min: 0, max: 100}
+      - {name: assessment_score,    type: float, min: 0, max: 100, nullable: true}
+      - {name: last_activity_date,  type: date, description: "Used by data_quality for stale-record checks"}
+    optional_columns: []
+
+  # --------------------------------------------------------------------------
+  # field_issues.csv — one row per issue
+  # --------------------------------------------------------------------------
+  field_issues:
+    file: "field_issues.csv"
+    grain: "one row per reported field issue"
+    primary_key: "issue_id"
+    foreign_keys:
+      - {column: school_id, references: "schools.school_id"}
+    required_columns:
+      - {name: issue_id,    type: string}
+      - {name: school_id,   type: string}
+      - {name: issue_type,  type: enum, enums: ["infra", "content", "device", "attendance", "training", "other"]}
+      - {name: severity,    type: enum, enums: ["low", "med", "high", "critical"]}
+      - {name: status,      type: enum, enums: ["open", "in_progress", "resolved"]}
+      - {name: reported_by, type: string, description: "Role / channel, not a real name"}
+      - {name: description, type: string}
+      - {name: created_at,  type: date}
+      - {name: resolved_at, type: date, nullable: true, description: "NULL while the issue is open"}
+    optional_columns: []
+
+# --------------------------------------------------------------------------
+# Cross-file invariants the validator enforces
+# --------------------------------------------------------------------------
+invariants:
+  - "schools.school_id is unique."
+  - "Every (school_id) in diksha_usage, assessments, teacher_training, and field_issues must exist in schools."
+  - "diksha_usage.week values must parse as ISO week labels (YYYY-Www)."
+  - "field_issues.created_at must not be in the future relative to REFERENCE_DATE."
+  - "teacher_training.completion_percent must lie in [0, 100]."
+  - "assessments.current_score may be NULL but, when present, must lie in [0, 100]."
+
+# --------------------------------------------------------------------------
+# What this schema deliberately does NOT contain
+# --------------------------------------------------------------------------
+forbidden_fields:
+  - "child names, ages, DOBs, marks-per-child"
+  - "Aadhaar / APAAR / any government student ID"
+  - "real phone numbers, addresses, GPS coordinates"
+  - "real teacher names or contact details"
+  - "any data identifying a specific individual student or teacher"
