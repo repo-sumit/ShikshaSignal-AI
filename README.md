@@ -10,10 +10,11 @@
 explainable risk ranking, and action tracker** a PMU analyst hand-builds before every DEO review —
 with **every number deterministic, traceable, and auditable**.
 
-This repo is built in validated phases. The deterministic core (M1) and the District
-Review Compiler (M3) are in. **Milestone 4 adds optional free / local LLM providers
-(Gemini, Groq, Ollama) behind the same interface, with safe fallback to MockLLM** —
-the project still runs fully offline with zero API keys by default.
+This repo is built in validated phases. The deterministic core (M1), the District
+Review Compiler (M3), and free/local LLM providers (M4) are in. **Milestone 5 adds
+an optional local Streamlit viewer for inspecting and downloading the generated
+review artifacts** — the CLI is unchanged and remains the source of truth; the
+viewer never duplicates review logic.
 
 ---
 
@@ -132,6 +133,42 @@ Environment variables (see `.env.example`):
 4. **Actions always start as `proposed`.** Human approval is a downstream concern.
 5. **No paid API is required for the project to run** — MockLLM is feature-complete.
 
+## Run (Milestone 5 — local Streamlit viewer)
+
+A small dashboard around the existing CLI. The viewer never duplicates review
+logic — it invokes `app.review.run_review(...)` (the same callable the CLI uses)
+and reads the four artifacts back through `app.services.artifact_reader`.
+
+```bash
+pip install -r requirements.txt
+python scripts/generate_synthetic_data.py --seed 42
+python -m app.review --district "District Alpha" --period 2026-05 --llm-provider mock  # optional warm-up
+streamlit run frontend/streamlit_app.py
+```
+
+The viewer is **local-first** and **synthetic-only**. It opens at
+`http://localhost:8501`.
+
+Sidebar controls:
+- District (read from `data/synthetic/schools.csv`)
+- Period (derived from synthetic weeks)
+- LLM provider (`mock` / `gemini` / `groq` / `ollama` — falls back to mock if unavailable)
+- Top-N risky schools / blocks
+- Strict-grounding toggle
+- **Generate Review** button (runs the compiler end-to-end)
+
+Main area:
+- Executive overview — `st.metric` cards driven by `review_facts.json`
+- Five tabs: **Review Memo**, **Risk Ranking**, **Action Tracker**,
+  **Audit Log**, **Review Facts**, each with a `st.download_button`
+
+Guardrails preserved from earlier phases:
+- All data remains synthetic and local-first.
+- The LLM still never computes numbers; every memo number is grounded.
+- Actions remain `proposed` until human approval.
+- Missing data / missing credentials / provider fallback are all surfaced
+  clearly in the UI — never as a raw traceback (unless debug mode is on).
+
 ### What goes in the audit log (Milestone 4)
 
 ```json
@@ -156,7 +193,7 @@ Environment variables (see `.env.example`):
 
 ---
 
-## Repository layout (Phase 1)
+## Repository layout
 
 ```text
 .
@@ -167,17 +204,25 @@ Environment variables (see `.env.example`):
 │   └── generate_synthetic_data.py     # seeded, correlated, seasonal synthetic data
 ├── app/
 │   ├── config.py                      # paths, risk weights/bands, scale config, calendar
+│   ├── review.py                      # M3 review compiler (CLI + run_review callable)
 │   ├── schemas/                       # Pydantic schemas for each CSV
-│   └── tools/
-│       ├── csv_loader.py              # typed, validated loading of the 5 CSVs
-│       ├── data_quality.py            # missing/stale/invalid/duplicate + coverage + ID reconciliation
-│       ├── kpi_calculator.py          # target-vs-actual-vs-last-period KPIs
-│       ├── risk_score.py              # decomposed weighted risk score + bands
-│       └── rankings.py                # block/school ranking + decliners → CSV
+│   ├── tools/
+│   │   ├── csv_loader.py              # typed, validated loading of the 5 CSVs
+│   │   ├── data_quality.py            # missing/stale/invalid/duplicate + coverage + ID reconciliation
+│   │   ├── kpi_calculator.py          # target-vs-actual-vs-last-period KPIs
+│   │   ├── risk_score.py              # decomposed weighted risk score + bands
+│   │   └── rankings.py                # block/school ranking + decliners → CSV
+│   ├── llm/                           # M4: mock / gemini / groq / ollama + factory + prompts
+│   ├── reporting/                     # M3: markdown_report, action_tracker, audit_log
+│   ├── eval/grounding.py              # number-grounding check (no LLM may invent numbers)
+│   └── services/
+│       └── artifact_reader.py         # M5: thin readers used by the Streamlit viewer
+├── frontend/
+│   └── streamlit_app.py               # M5: local viewer (sidebar + 5 tabs + downloads)
 ├── data/
 │   └── synthetic/                     # generated CSVs (git-ignored)
 ├── outputs/                           # generated artifacts (git-ignored)
-└── tests/                             # unit tests incl. reproducibility + band split
+└── tests/                             # unit tests incl. reproducibility + grounding
 ```
 
 ## Data dictionary (synthetic)

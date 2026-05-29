@@ -9,6 +9,9 @@ venv/
 # Secrets — never commit real keys
 .env
 
+# Local Streamlit overrides (theme/credentials/secrets.toml etc.)
+.streamlit/
+
 # Generated artifacts (regenerable from the seeded scripts)
 data/synthetic/*.csv
 outputs/*.md

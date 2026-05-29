@@ -1,8 +1,16 @@
-# ShikshaSignal AI — Phase 1 (deterministic core, no AI) dependencies.
-# Kept deliberately lean. LLM/RAG/dashboard deps are added in later phases.
+# ShikshaSignal AI runtime dependencies. Kept deliberately lean.
+
+# ---- Core (Milestones 1, 3) ----
 pandas>=2.0
 numpy>=1.24
 pydantic>=2.0
 jinja2>=3.1
 pyyaml>=6.0
+
+# ---- Testing ----
 pytest>=7.0
+
+# ---- Local viewer (Milestone 5) ----
+# Streamlit powers the optional local review viewer (frontend/streamlit_app.py).
+# The CLI does not depend on it — installing without Streamlit still works.
+streamlit>=1.32
